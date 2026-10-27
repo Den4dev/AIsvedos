@@ -1,0 +1,9 @@
+build/
+build.log
+.vs/
+*.user
+test_audio/
+tools/__pycache__/
+*.wav
+*.aiff
+*.mp3
