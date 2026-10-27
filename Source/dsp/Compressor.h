@@ -33,6 +33,11 @@ private:
     float knee = 6.0f;
     float makeupGain = 1.0f;
     float maxGrDb = 0.0f;
+
+    float targetAmount = 0.0f;
+    float smoothedAmount = 0.0f;
+    float targetThreshold = -18.0f;
+    float targetBaseRatio = 2.0f;
 };
 
 } // namespace vp

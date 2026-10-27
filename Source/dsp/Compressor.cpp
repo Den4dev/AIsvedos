@@ -16,6 +16,7 @@ void Compressor::reset()
 {
     envelope = 0.0f;
     maxGrDb = 0.0f;
+    smoothedAmount = targetAmount;
 }
 
 void Compressor::setParams (float amount,
@@ -25,21 +26,25 @@ void Compressor::setParams (float amount,
                             float releaseMs,
                             float kneeDb) noexcept
 {
-    const float a = std::clamp (amount, 0.0f, 1.0f);
-    threshold = thresholdDb - 2.0f * a;
-    ratio = 1.0f + (baseRatio - 1.0f) * a;
+    targetAmount = std::clamp (amount, 0.0f, 1.0f);
+    targetThreshold = thresholdDb;
+    targetBaseRatio = baseRatio;
     knee = kneeDb;
 
     attackCoeff = std::exp (-1.0f / (float) (sampleRate * std::max (attackMs, 0.05f) * 0.001));
     releaseCoeff = std::exp (-1.0f / (float) (sampleRate * std::max (releaseMs, 1.0f) * 0.001));
-
-    const float makeupDb = -threshold * (1.0f - 1.0f / std::max (ratio, 1.0f)) * 0.35f;
-    makeupGain = std::pow (10.0f, makeupDb / 20.0f);
 }
 
 void Compressor::process (float* left, float* right, int numSamples) noexcept
 {
+    const float amountCoeff = 1.0f - std::exp (-(float) numSamples / (float) (sampleRate * 0.02));
+    smoothedAmount += amountCoeff * (targetAmount - smoothedAmount);
+    threshold = targetThreshold - 2.0f * smoothedAmount;
+    ratio = 1.0f + (targetBaseRatio - 1.0f) * smoothedAmount;
+
     const float invRatio = 1.0f - 1.0f / std::max (ratio, 1.0f);
+    const float makeupDb = -threshold * (1.0f - 1.0f / std::max (ratio, 1.0f)) * 0.35f;
+    makeupGain = std::pow (10.0f, makeupDb / 20.0f);
     maxGrDb = 0.0f;
 
     for (int i = 0; i < numSamples; ++i)

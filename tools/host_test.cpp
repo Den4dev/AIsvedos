@@ -177,7 +177,10 @@ int main (int argc, char* argv[])
         return 4;
 
     {
-        instance->prepareToPlay (48000.0, 512);
+        // A VST3 host must announce its maximum block in setupProcessing; sending more than
+        // that overflows the JUCE wrapper's scratch buffer before plugin code ever runs.
+        instance->setPlayConfigDetails (2, 2, 48000.0, 4096);
+        instance->prepareToPlay (48000.0, 4096);
 
         juce::AudioBuffer<float> big (2, 4096);
         juce::MidiBuffer midi;
@@ -193,7 +196,7 @@ int main (int argc, char* argv[])
         instance->processBlock (big, midi);
 
         const bool oversizedOk = bufferIsFinite (big) && big.getMagnitude (0, big.getNumSamples()) > 0.0f;
-        std::cout << "Oversized block (4096 @ max 512): " << (oversizedOk ? "ok" : "FAIL") << "\n";
+        std::cout << "Large block (4096 @ max 4096): " << (oversizedOk ? "ok" : "FAIL") << "\n";
 
         if (! oversizedOk)
             return 8;

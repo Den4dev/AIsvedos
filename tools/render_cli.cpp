@@ -117,9 +117,8 @@ vp::BandFrame frameFromProfile (const vp::BandProfile& profile)
     return frame;
 }
 
-void processBuffer (vp::MixEngine& engine, juce::AudioBuffer<float>& buffer, RenderStats& stats)
+void processBuffer (vp::MixEngine& engine, juce::AudioBuffer<float>& buffer, RenderStats& stats, int blockSize)
 {
-    constexpr int blockSize = 512;
     juce::AudioBuffer<float> block (2, blockSize);
 
     for (int offset = 0; offset < buffer.getNumSamples(); offset += blockSize)
@@ -205,6 +204,7 @@ int main (int argc, char* argv[])
     const auto beatPath = valueOf ("--beat");
     const auto referencePath = valueOf ("--reference");
     const auto outputBase = valueOf ("--out", "test_audio/out");
+    const int blockSize = std::max (32, valueOf ("--block", "512").getIntValue());
 
     if (vocalPath.isEmpty() || beatPath.isEmpty())
     {
@@ -273,7 +273,7 @@ int main (int argc, char* argv[])
         vocalEngine.setReferenceProfile (referenceProfile);
         vocalEngine.setVocalProfile (vocalProfile);
         vocalEngine.setOppositeFrameOverride (beatFrame);
-        processBuffer (vocalEngine, vocalProcessed, vocalStats);
+        processBuffer (vocalEngine, vocalProcessed, vocalStats, blockSize);
         std::cout << "Vocal auto-gain: " << vocalEngine.getAutoGainDb() << " dB\n";
     }
 
@@ -283,7 +283,7 @@ int main (int argc, char* argv[])
         beatEngine.setParams (beatParams);
         beatEngine.setBus (bus.get());
         beatEngine.setOppositeFrameOverride (vocalFrame);
-        processBuffer (beatEngine, beatProcessed, beatStats);
+        processBuffer (beatEngine, beatProcessed, beatStats, blockSize);
     }
 
     juce::AudioBuffer<float> mix (2, vocalProcessed.getNumSamples());
