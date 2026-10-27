@@ -22,19 +22,28 @@ class DoubleBuffer
 public:
     void write (const T& value) noexcept
     {
-        const int next = 1 - index.load (std::memory_order_relaxed);
+        const juce::SpinLock::ScopedLockType lock (writeLock);
+        const int next = (index.load (std::memory_order_relaxed) + 1) % 3;
         buffers[next] = value;
         index.store (next, std::memory_order_release);
     }
 
     T read() const noexcept
     {
-        return buffers[index.load (std::memory_order_acquire)];
+        for (;;)
+        {
+            const int slot = index.load (std::memory_order_acquire);
+            const T copy = buffers[slot];
+
+            if (index.load (std::memory_order_acquire) == slot)
+                return copy;
+        }
     }
 
 private:
-    T buffers[2] {};
+    T buffers[3] {};
     std::atomic<int> index { 0 };
+    juce::SpinLock writeLock;
 };
 
 class MixEngine
@@ -83,7 +92,7 @@ public:
 private:
     bool readOppositeFrame (BandFrame& out) const noexcept;
     std::array<float, kNumEqBands> computeEqTargets (const BandFrame& ownFrame) const noexcept;
-    void computeUnmask (const BandFrame& ownFrame) noexcept;
+    void computeUnmask (const BandFrame& ownFrame, int numSamples) noexcept;
 
     MixParams params;
     double sampleRate = 48000.0;
@@ -109,6 +118,8 @@ private:
 
     float autoGainDb = 0.0f;
     std::array<float, 2> unmaskCut { 0.0f, 0.0f };
+    float outputGainSmoothed = 1.0f;
+    float mixSmoothed = 1.0f;
 
     DoubleBuffer<BandProfile> referenceBuffer;
     std::atomic<bool> referenceValid { false };

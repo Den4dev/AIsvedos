@@ -37,9 +37,9 @@ private:
     void pushSamples (const float* mono, int numSamples) noexcept;
     void doFFT() noexcept;
 
-    static constexpr int fftOrder = 11;
+    static constexpr int fftOrder = 13;
     static constexpr int fftSize = 1 << fftOrder;
-    static constexpr int hopSize = fftSize / 2;
+    static constexpr int hopSize = fftSize / 4;
 
     double sampleRate = 48000.0;
     juce::dsp::FFT fft { fftOrder };

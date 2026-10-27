@@ -154,7 +154,8 @@ void Analyzer::doFFT() noexcept
     {
         const float db = 10.0f * std::log10 (powers[(size_t) i] + 1.0e-12f);
         const float previous = meterBands[(size_t) i].load (std::memory_order_relaxed);
-        const float smoothed = db > previous ? db : previous + 0.25f * (db - previous);
+        const float coeff = db > previous ? 0.5f : 0.25f;
+        const float smoothed = previous + coeff * (db - previous);
         meterBands[(size_t) i].store (smoothed, std::memory_order_relaxed);
     }
 

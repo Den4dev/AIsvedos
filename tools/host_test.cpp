@@ -73,10 +73,60 @@ float processBlocks (juce::AudioPluginInstance& instance, int blocks, bool check
     instance.releaseResources();
     return maxOut;
 }
+
+bool checkOutputSmoothing (juce::AudioPluginInstance& instance)
+{
+    instance.setPlayConfigDetails (2, 2, 48000.0, 512);
+    instance.prepareToPlay (48000.0, 512);
+
+    if (auto* autoGain = findParameter (instance, "Auto Gain"))
+        autoGain->setValueNotifyingHost (0.0f);
+
+    auto* output = findParameter (instance, "Output");
+
+    if (output == nullptr)
+        return true;
+
+    output->setValueNotifyingHost (0.6667f); // 0 dB on the -24..+12 range
+
+    juce::AudioBuffer<float> buffer (2, 512);
+    juce::MidiBuffer midi;
+    double phase = 0.0;
+
+    auto renderBlock = [&]() -> float
+    {
+        buffer.clear();
+
+        for (int i = 0; i < buffer.getNumSamples(); ++i)
+        {
+            const float sample = 0.2f * (float) std::sin (phase);
+            phase += juce::MathConstants<double>::twoPi * 220.0 / 48000.0;
+            buffer.setSample (0, i, sample);
+            buffer.setSample (1, i, sample);
+        }
+
+        instance.processBlock (buffer, midi);
+        return buffer.getRMSLevel (0, 0, buffer.getNumSamples());
+    };
+
+    float previousRms = 0.0f;
+
+    for (int i = 0; i < 16; ++i)
+        previousRms = renderBlock();
+
+    output->setValueNotifyingHost (0.0f);
+    const float afterRms = renderBlock();
+    instance.releaseResources();
+
+    const float ratio = previousRms > 0.0f ? afterRms / previousRms : 0.0f;
+    std::cout << "Output step ratio (smoothing): " << ratio << "\n";
+    return ratio > 0.3f;
+}
 } // namespace
 
 int main (int argc, char* argv[])
 {
+    std::cout << std::unitbuf;
     juce::ScopedJuceInitialiser_GUI initialiser;
     juce::ignoreUnused (initialiser);
 
@@ -126,6 +176,31 @@ int main (int argc, char* argv[])
     if (vocalMax <= 0.0f)
         return 4;
 
+    {
+        instance->prepareToPlay (48000.0, 512);
+
+        juce::AudioBuffer<float> big (2, 4096);
+        juce::MidiBuffer midi;
+        big.clear();
+
+        for (int i = 0; i < big.getNumSamples(); ++i)
+        {
+            const float sample = 0.1f * (float) std::sin (juce::MathConstants<double>::twoPi * 220.0 * i / 48000.0);
+            big.setSample (0, i, sample);
+            big.setSample (1, i, sample);
+        }
+
+        instance->processBlock (big, midi);
+
+        const bool oversizedOk = bufferIsFinite (big) && big.getMagnitude (0, big.getNumSamples()) > 0.0f;
+        std::cout << "Oversized block (4096 @ max 512): " << (oversizedOk ? "ok" : "FAIL") << "\n";
+
+        if (! oversizedOk)
+            return 8;
+
+        instance->releaseResources();
+    }
+
     if (auto* bypass = findParameter (*instance, "FX Bypass"))
     {
         bypass->setValueNotifyingHost (1.0f);
@@ -167,6 +242,12 @@ int main (int argc, char* argv[])
 
     if (beatMax <= 0.0f)
         return 7;
+
+    if (! checkOutputSmoothing (*second))
+    {
+        std::cerr << "Output parameter is not smoothed\n";
+        return 9;
+    }
 
     std::cout << "OK\n";
     return 0;

@@ -8,6 +8,14 @@
 namespace vp
 {
 
+namespace
+{
+float timeCoeff (double sampleRate, int numSamples, double tauSeconds) noexcept
+{
+    return 1.0f - std::exp (-(float) numSamples / (float) (sampleRate * tauSeconds));
+}
+} // namespace
+
 void MixEngine::prepare (double newSampleRate, int newMaxBlockSize, int numChannels)
 {
     sampleRate = newSampleRate > 0.0 ? newSampleRate : 48000.0;
@@ -39,6 +47,8 @@ void MixEngine::reset()
     dry.clear();
     autoGainDb = 0.0f;
     unmaskCut = { 0.0f, 0.0f };
+    outputGainSmoothed = dbToGain (params.outputGainDb);
+    mixSmoothed = std::clamp (params.mix, 0.0f, 1.0f);
     grMeter.store (0.0f, std::memory_order_relaxed);
     deessMeter.store (0.0f, std::memory_order_relaxed);
     autoGainMeter.store (0.0f, std::memory_order_relaxed);
@@ -140,7 +150,7 @@ std::array<float, kNumEqBands> MixEngine::computeEqTargets (const BandFrame& own
     return targets;
 }
 
-void MixEngine::computeUnmask (const BandFrame& ownFrame) noexcept
+void MixEngine::computeUnmask (const BandFrame& ownFrame, int numSamples) noexcept
 {
     BandFrame opposite;
     const bool linked = readOppositeFrame (opposite);
@@ -174,8 +184,10 @@ void MixEngine::computeUnmask (const BandFrame& ownFrame) noexcept
         }
     }
 
+    const float coeff = timeCoeff (sampleRate, numSamples, 0.05);
+
     for (int k = 0; k < 2; ++k)
-        unmaskCut[(size_t) k] += 0.18f * (targets[(size_t) k] - unmaskCut[(size_t) k]);
+        unmaskCut[(size_t) k] += coeff * (targets[(size_t) k] - unmaskCut[(size_t) k]);
 }
 
 void MixEngine::process (juce::AudioBuffer<float>& buffer, float tempo) noexcept
@@ -185,6 +197,9 @@ void MixEngine::process (juce::AudioBuffer<float>& buffer, float tempo) noexcept
 
     if (numSamples <= 0 || numChannels <= 0)
         return;
+
+    if (numSamples > dry.getNumSamples())
+        dry.setSize (maxChannels, numSamples, false, true, false);
 
     inputAnalyzer.process (buffer);
 
@@ -228,7 +243,9 @@ void MixEngine::process (juce::AudioBuffer<float>& buffer, float tempo) noexcept
             if (readOppositeFrame (opposite) && opposite.lufs > -50.0f)
                 targetLufs = std::clamp (opposite.lufs - 3.0f, -30.0f, -12.0f);
 
-            autoGainDb = std::clamp (autoGainDb + (targetLufs - measuredLufs) * 0.01f, -12.0f, 12.0f);
+            autoGainDb = std::clamp (autoGainDb
+                                         + (targetLufs - measuredLufs) * timeCoeff (sampleRate, numSamples, 1.0),
+                                     -12.0f, 12.0f);
         }
     }
     else if (! isVocal)
@@ -252,7 +269,7 @@ void MixEngine::process (juce::AudioBuffer<float>& buffer, float tempo) noexcept
     eq.setStaticTargets (eqTargets);
     eq.setLowCut (isVocal ? params.lowCutHz : 25.0f);
 
-    computeUnmask (ownFrame);
+    computeUnmask (ownFrame, numSamples);
 
     if (isVocal)
     {
@@ -318,18 +335,29 @@ void MixEngine::process (juce::AudioBuffer<float>& buffer, float tempo) noexcept
     grMeter.store (blockGr, std::memory_order_relaxed);
     deessMeter.store (blockDeEss, std::memory_order_relaxed);
 
-    const float outputGain = dbToGain (params.outputGainDb);
-    const float mix = std::clamp (params.mix, 0.0f, 1.0f);
+    const float targetOutputGain = dbToGain (params.outputGainDb);
+    const float targetMix = std::clamp (params.mix, 0.0f, 1.0f);
+    const float smoothCoeff = timeCoeff (sampleRate, 1, 0.02);
+
+    float* wetChannels[2] {};
+    const float* dryChannels[2] {};
 
     for (int ch = 0; ch < numChannels; ++ch)
     {
-        float* wet = buffer.getWritePointer (ch);
-        const float* dryData = dry.getReadPointer (ch);
+        wetChannels[ch] = buffer.getWritePointer (ch);
+        dryChannels[ch] = dry.getReadPointer (ch);
+    }
 
-        for (int i = 0; i < numSamples; ++i)
+    for (int i = 0; i < numSamples; ++i)
+    {
+        outputGainSmoothed += smoothCoeff * (targetOutputGain - outputGainSmoothed);
+        mixSmoothed += smoothCoeff * (targetMix - mixSmoothed);
+
+        for (int ch = 0; ch < numChannels; ++ch)
         {
-            const float processed = wet[i] * outputGain;
-            wet[i] = dryData[i] + mix * (processed - dryData[i]);
+            const float clean = dryChannels[ch][i];
+            const float processed = wetChannels[ch][i] * outputGainSmoothed;
+            wetChannels[ch][i] = clean + mixSmoothed * (processed - clean);
         }
     }
 
