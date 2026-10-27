@@ -17,6 +17,7 @@ set(VP_CORE_SOURCES
     Source/dsp/Presets.cpp
     Source/dsp/ReferenceAnalysis.cpp
     Source/dsp/SessionBus.cpp
+    Source/dsp/Space.cpp
 )
 
 add_library(vp_core STATIC ${VP_CORE_SOURCES})
@@ -86,6 +87,7 @@ juce_add_console_app(host_test PRODUCT_NAME "host_test")
 target_sources(host_test PRIVATE tools/host_test.cpp)
 
 target_link_libraries(host_test PRIVATE
+    vp_core
     juce::juce_audio_processors
     juce::juce_audio_formats
     juce::juce_gui_basics

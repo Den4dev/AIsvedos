@@ -6,6 +6,8 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include "dsp/MixEngine.h"
+
 namespace
 {
 juce::AudioProcessorParameter* findParameter (juce::AudioProcessor& processor, const juce::String& name)
@@ -121,6 +123,125 @@ bool checkOutputSmoothing (juce::AudioPluginInstance& instance)
     const float ratio = previousRms > 0.0f ? afterRms / previousRms : 0.0f;
     std::cout << "Output step ratio (smoothing): " << ratio << "\n";
     return ratio > 0.3f;
+}
+bool checkSidechainBus (juce::AudioPluginInstance& plugin)
+{
+    if (plugin.getBusCount (true) < 2)
+        return false;
+
+    auto* sidechainBus = plugin.getBus (true, 1);
+
+    if (sidechainBus == nullptr || sidechainBus->getName() != "Sidechain")
+        return false;
+
+    auto layout = plugin.getBusesLayout();
+
+    if (layout.inputBuses.size() < 2)
+        return false;
+
+    layout.inputBuses.set (1, juce::AudioChannelSet::stereo());
+
+    if (! plugin.setBusesLayout (layout) || ! plugin.getBus (true, 1)->isEnabled())
+        return false;
+
+    plugin.setPlayConfigDetails (2, 2, 48000.0, 512);
+    plugin.prepareToPlay (48000.0, 512);
+
+    juce::AudioBuffer<float> buffer (2, 512);
+    juce::MidiBuffer midi;
+
+    for (int i = 0; i < buffer.getNumSamples(); ++i)
+    {
+        const float sample = 0.2f * (float) std::sin (juce::MathConstants<double>::twoPi * 220.0 * i / 48000.0);
+        buffer.setSample (0, i, sample);
+        buffer.setSample (1, i, sample);
+    }
+
+    plugin.processBlock (buffer, midi);
+    const bool ok = bufferIsFinite (buffer) && buffer.getMagnitude (0, buffer.getNumSamples()) > 0.0f;
+
+    plugin.releaseResources();
+    layout.inputBuses.set (1, juce::AudioChannelSet::disabled());
+    plugin.setBusesLayout (layout);
+
+    return ok;
+}
+
+bool checkSidechainRouting()
+{
+    vp::MixEngine engine;
+    engine.prepare (48000.0, 512, 2);
+
+    vp::MixParams params;
+    params.role = vp::Role::vocal;
+    params.mode = vp::Mode::style;
+    params.autoGain = false;
+    params.reverbAmount = 0.0f;
+    params.delayAmount = 0.0f;
+    engine.setParams (params);
+
+    if (engine.isOppositeLinked())
+        return false;
+
+    juce::AudioBuffer<float> sidechain (2, 512);
+
+    for (int i = 0; i < sidechain.getNumSamples(); ++i)
+    {
+        const float sample = 0.2f * (float) std::sin (juce::MathConstants<double>::twoPi * 220.0 * i / 48000.0);
+        sidechain.setSample (0, i, sample);
+        sidechain.setSample (1, i, sample);
+    }
+
+    engine.processSidechain (sidechain);
+
+    juce::AudioBuffer<float> buffer (2, 512);
+    buffer.clear();
+    engine.process (buffer, 120.0f);
+
+    return engine.isSidechainActive() && engine.isOppositeLinked();
+}
+
+bool checkSpaceTail()
+{
+    vp::MixEngine engine;
+    engine.prepare (48000.0, 512, 2);
+
+    vp::MixParams params;
+    params.role = vp::Role::vocal;
+    params.mode = vp::Mode::style;
+    params.autoGain = false;
+    params.reverbAmount = 1.0f;
+    params.delayAmount = 1.0f;
+    params.mix = 1.0f;
+    engine.setParams (params);
+
+    juce::AudioBuffer<float> buffer (2, 512);
+    double phase = 0.0;
+
+    for (int block = 0; block < 16; ++block)
+    {
+        for (int i = 0; i < buffer.getNumSamples(); ++i)
+        {
+            const float sample = 0.2f * (float) std::sin (phase);
+            phase += juce::MathConstants<double>::twoPi * 220.0 / 48000.0;
+            buffer.setSample (0, i, sample);
+            buffer.setSample (1, i, sample);
+        }
+
+        engine.process (buffer, 120.0f);
+    }
+
+    float tail = 0.0f;
+
+    for (int block = 0; block < 16; ++block)
+    {
+        buffer.clear();
+        engine.process (buffer, 120.0f);
+        tail = std::max (tail, buffer.getMagnitude (0, buffer.getNumSamples()));
+    }
+
+    std::cout << "Space tail: " << tail << "\n";
+    return tail > 1.0e-4f;
 }
 } // namespace
 
@@ -250,6 +371,28 @@ int main (int argc, char* argv[])
     {
         std::cerr << "Output parameter is not smoothed\n";
         return 9;
+    }
+
+    if (! checkSidechainBus (*instance))
+    {
+        std::cerr << "Sidechain bus is not usable\n";
+        return 12;
+    }
+
+    std::cout << "Sidechain bus: ok\n";
+
+    if (! checkSidechainRouting())
+    {
+        std::cerr << "Sidechain frame is not used\n";
+        return 10;
+    }
+
+    std::cout << "Sidechain routing: ok\n";
+
+    if (! checkSpaceTail())
+    {
+        std::cerr << "Style space has no tail\n";
+        return 11;
     }
 
     std::cout << "OK\n";

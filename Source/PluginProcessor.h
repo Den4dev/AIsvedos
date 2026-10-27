@@ -26,7 +26,7 @@ public:
     bool acceptsMidi() const override { return false; }
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
-    double getTailLengthSeconds() const override { return 0.0; }
+    double getTailLengthSeconds() const override { return 2.0; }
 
     int getNumPrograms() override { return 1; }
     int getCurrentProgram() override { return 0; }
@@ -53,6 +53,7 @@ public:
     bool isLearnComplete() const noexcept { return engine.isCaptureComplete(); }
     float getLearnProgress() const noexcept { return engine.getCaptureProgress(); }
     bool isOppositeLinked() const noexcept { return engine.isOppositeLinked(); }
+    bool isSidechainActive() const noexcept { return engine.isSidechainActive(); }
 
     float getInputLufs() const noexcept { return engine.getInputFrame().lufs; }
     float getOutputLufs() const noexcept { return engine.getOutputFrame().lufs; }
@@ -92,6 +93,8 @@ private:
     std::atomic<float>* deEssParam = nullptr;
     std::atomic<float>* unmaskParam = nullptr;
     std::atomic<float>* satParam = nullptr;
+    std::atomic<float>* reverbParam = nullptr;
+    std::atomic<float>* delayParam = nullptr;
     std::atomic<float>* outputParam = nullptr;
     std::atomic<float>* mixParam = nullptr;
     std::atomic<float>* bypassParam = nullptr;

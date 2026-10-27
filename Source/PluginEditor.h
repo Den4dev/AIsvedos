@@ -60,6 +60,7 @@ private:
 
     struct Knob
     {
+        juce::String parameterId;
         std::unique_ptr<juce::Slider> slider;
         std::unique_ptr<juce::Label> label;
         std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attachment;

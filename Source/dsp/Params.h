@@ -120,6 +120,8 @@ struct MixParams
     float deEssAmount = 0.5f;
     float unmaskAmount = 0.5f;
     float saturation = 0.5f;
+    float reverbAmount = 0.35f;
+    float delayAmount = 0.35f;
     float outputGainDb = 0.0f;
     float mix = 1.0f;
     bool bypass = false;

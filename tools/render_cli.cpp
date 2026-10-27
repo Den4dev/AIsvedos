@@ -210,8 +210,9 @@ int main (int argc, char* argv[])
     {
         std::cerr << "Usage: render_cli --vocal vocal.wav --beat beat.wav "
                      "[--reference ref.wav] [--out prefix] [--genre trap] "
-                     "[--mode fit|reference] [--fit 50] [--ref 50] [--comp 50] "
-                     "[--deess 50] [--unmask 50] [--sat 50] [--lowcut 90] [--outgain 0]\n";
+                     "[--mode fit|style|reference] [--fit 50] [--ref 50] [--comp 50] "
+                     "[--deess 50] [--unmask 50] [--sat 50] [--reverb 35] [--delay 35] "
+                     "[--lowcut 90] [--outgain 0] [--block 512]\n";
         return 1;
     }
 
@@ -239,9 +240,13 @@ int main (int argc, char* argv[])
 
     auto bus = vp::getSessionBus ("cli");
 
+    const auto modeText = valueOf ("--mode", "fit").toLowerCase();
+
     vp::MixParams vocalParams;
     vocalParams.role = vp::Role::vocal;
-    vocalParams.mode = valueOf ("--mode", "fit") == "reference" ? vp::Mode::reference : vp::Mode::fit;
+    vocalParams.mode = modeText == "reference" ? vp::Mode::reference
+                     : modeText == "style"     ? vp::Mode::style
+                                               : vp::Mode::fit;
     vocalParams.genre = parseGenre (valueOf ("--genre", "trap"));
     vocalParams.fitAmount = valueOf ("--fit", "50").getFloatValue() * 0.01f;
     vocalParams.refMatch = valueOf ("--ref", "50").getFloatValue() * 0.01f;
@@ -249,6 +254,8 @@ int main (int argc, char* argv[])
     vocalParams.deEssAmount = valueOf ("--deess", "50").getFloatValue() * 0.01f;
     vocalParams.unmaskAmount = valueOf ("--unmask", "50").getFloatValue() * 0.01f;
     vocalParams.saturation = valueOf ("--sat", "50").getFloatValue() * 0.01f;
+    vocalParams.reverbAmount = valueOf ("--reverb", "35").getFloatValue() * 0.01f;
+    vocalParams.delayAmount = valueOf ("--delay", "35").getFloatValue() * 0.01f;
     vocalParams.lowCutHz = valueOf ("--lowcut", "90").getFloatValue();
     vocalParams.outputGainDb = valueOf ("--outgain", "0").getFloatValue();
     vocalParams.autoGain = ! args.contains ("--no-autogain");

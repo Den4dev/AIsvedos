@@ -49,6 +49,7 @@ vp::BandProfile profileFromText (const juce::String& text)
 VocalPocketProcessor::VocalPocketProcessor()
     : AudioProcessor (BusesProperties()
                           .withInput ("Input", juce::AudioChannelSet::stereo(), true)
+                          .withInput ("Sidechain", juce::AudioChannelSet::stereo(), false)
                           .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       apvts (*this, nullptr, "VocalPocketState", createLayout())
 {
@@ -98,6 +99,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout VocalPocketProcessor::create
         juce::ParameterID { "sat", 1 }, "Saturation", juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f), 50.0f, "%"));
 
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "reverb", 1 }, "Reverb", juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f), 35.0f, "%"));
+
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "delay", 1 }, "Delay", juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f), 35.0f, "%"));
+
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "output", 1 }, "Output", juce::NormalisableRange<float> (-24.0f, 12.0f, 0.1f), 0.0f, "dB"));
 
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
@@ -124,6 +131,8 @@ void VocalPocketProcessor::cacheParameterPointers()
     deEssParam = apvts.getRawParameterValue ("deess");
     unmaskParam = apvts.getRawParameterValue ("unmask");
     satParam = apvts.getRawParameterValue ("sat");
+    reverbParam = apvts.getRawParameterValue ("reverb");
+    delayParam = apvts.getRawParameterValue ("delay");
     outputParam = apvts.getRawParameterValue ("output");
     mixParam = apvts.getRawParameterValue ("mix");
     bypassParam = apvts.getRawParameterValue ("bypass");
@@ -144,7 +153,8 @@ void VocalPocketProcessor::setSession (const juce::String& id)
 
 void VocalPocketProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
-    engine.prepare (sampleRate, samplesPerBlock, getTotalNumInputChannels());
+    const int mainChannels = getBus (true, 0) != nullptr ? getChannelCountOfBus (true, 0) : 0;
+    engine.prepare (sampleRate, samplesPerBlock, mainChannels);
     engine.setBus (busPtr.load (std::memory_order_acquire));
 }
 
@@ -154,13 +164,26 @@ void VocalPocketProcessor::releaseResources()
 
 bool VocalPocketProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
-    const auto& input = layouts.getMainInputChannelSet();
-    const auto& output = layouts.getMainOutputChannelSet();
+    const auto& mainInput = layouts.getMainInputChannelSet();
+    const auto& mainOutput = layouts.getMainOutputChannelSet();
 
-    if (input != output)
+    if (mainInput != mainOutput)
         return false;
 
-    return input == juce::AudioChannelSet::mono() || input == juce::AudioChannelSet::stereo();
+    if (mainInput != juce::AudioChannelSet::mono() && mainInput != juce::AudioChannelSet::stereo())
+        return false;
+
+    for (int i = 1; i < layouts.inputBuses.size(); ++i)
+    {
+        const auto& sidechain = layouts.inputBuses[i];
+
+        if (! sidechain.isDisabled()
+            && sidechain != juce::AudioChannelSet::mono()
+            && sidechain != juce::AudioChannelSet::stereo())
+            return false;
+    }
+
+    return true;
 }
 
 void VocalPocketProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
@@ -168,14 +191,31 @@ void VocalPocketProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     juce::ignoreUnused (midi);
     juce::ScopedNoDenormals noDenormals;
 
-    const int totalIn = getTotalNumInputChannels();
-    const int totalOut = getTotalNumOutputChannels();
+    const int numSamples = buffer.getNumSamples();
 
-    for (int ch = totalIn; ch < totalOut; ++ch)
-        buffer.clear (ch, 0, buffer.getNumSamples());
-
-    if (totalIn == 0 || buffer.getNumSamples() == 0)
+    if (numSamples == 0)
         return;
+
+    if (getBusCount (true) > 1)
+    {
+        if (auto* sidechainBus = getBus (true, 1);
+            sidechainBus != nullptr && sidechainBus->isEnabled() && sidechainBus->getNumberOfChannels() > 0)
+            engine.processSidechain (getBusBuffer (buffer, true, 1));
+    }
+
+    auto mainInput = getBusBuffer (buffer, true, 0);
+    auto mainOutput = getBusBuffer (buffer, false, 0);
+
+    if (mainInput.getNumChannels() <= 0 || mainOutput.getNumChannels() <= 0)
+        return;
+
+    for (int ch = 0; ch < mainOutput.getNumChannels(); ++ch)
+    {
+        if (ch < mainInput.getNumChannels())
+            mainOutput.copyFrom (ch, 0, mainInput, ch, 0, numSamples);
+        else
+            mainOutput.clear (ch, 0, numSamples);
+    }
 
     vp::MixParams params;
     params.role = (vp::Role) (int) roleParam->load();
@@ -188,6 +228,8 @@ void VocalPocketProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     params.deEssAmount = deEssParam->load() * 0.01f;
     params.unmaskAmount = unmaskParam->load() * 0.01f;
     params.saturation = satParam->load() * 0.01f;
+    params.reverbAmount = reverbParam->load() * 0.01f;
+    params.delayAmount = delayParam->load() * 0.01f;
     params.outputGainDb = outputParam->load();
     params.mix = mixParam->load() * 0.01f;
     params.bypass = bypassParam->load() > 0.5f;
@@ -207,7 +249,7 @@ void VocalPocketProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
         }
     }
 
-    engine.process (buffer, tempo);
+    engine.process (mainOutput, tempo);
 }
 
 void VocalPocketProcessor::loadReferenceFile (const juce::File& file)

@@ -12,6 +12,7 @@
 #include "EqChain.h"
 #include "Params.h"
 #include "SessionBus.h"
+#include "Space.h"
 
 namespace vp
 {
@@ -63,6 +64,9 @@ public:
 
     void clearOppositeFrameOverride() noexcept { oppositeOverrideValid = false; }
 
+    void processSidechain (const juce::AudioBuffer<float>& buffer) noexcept;
+    bool isSidechainActive() const noexcept { return sidechainValid.load (std::memory_order_acquire); }
+
     void process (juce::AudioBuffer<float>& buffer, float tempo) noexcept;
 
     BandFrame getInputFrame() const noexcept { return inputAnalyzer.getFrame(); }
@@ -101,15 +105,19 @@ private:
 
     Analyzer inputAnalyzer;
     Analyzer outputAnalyzer;
+    Analyzer sidechainAnalyzer;
     EqChain eq;
     Compressor compA;
     Compressor compB;
     DeEsser deEsser;
+    Space space;
     juce::AudioBuffer<float> dry;
 
     SessionBus* bus = nullptr;
     bool oppositeOverrideValid = false;
     BandFrame oppositeOverride;
+    std::atomic<bool> sidechainValid { false };
+    int sidechainHoldSamples = 0;
 
     std::atomic<float> grMeter { 0.0f };
     std::atomic<float> deessMeter { 0.0f };

@@ -24,10 +24,12 @@ void MixEngine::prepare (double newSampleRate, int newMaxBlockSize, int numChann
 
     inputAnalyzer.prepare (sampleRate, maxChannels);
     outputAnalyzer.prepare (sampleRate, maxChannels);
+    sidechainAnalyzer.prepare (sampleRate, 2);
     eq.prepare (sampleRate, maxChannels);
     compA.prepare (sampleRate);
     compB.prepare (sampleRate);
     deEsser.prepare (sampleRate);
+    space.prepare (sampleRate, maxBlockSize);
     dry.setSize (maxChannels, maxBlockSize, false, true, true);
 
     for (auto& value : curveMeters)
@@ -40,10 +42,14 @@ void MixEngine::reset()
 {
     inputAnalyzer.reset();
     outputAnalyzer.reset();
+    sidechainAnalyzer.reset();
     eq.reset();
     compA.reset();
     compB.reset();
     deEsser.reset();
+    space.reset();
+    sidechainValid.store (false, std::memory_order_release);
+    sidechainHoldSamples = 0;
     dry.clear();
     autoGainDb = 0.0f;
     unmaskCut = { 0.0f, 0.0f };
@@ -88,6 +94,12 @@ BandProfile MixEngine::takeVocalProfile()
 
 bool MixEngine::readOppositeFrame (BandFrame& out) const noexcept
 {
+    if (sidechainValid.load (std::memory_order_acquire))
+    {
+        out = sidechainAnalyzer.getFrame();
+        return true;
+    }
+
     if (oppositeOverrideValid)
     {
         out = oppositeOverride;
@@ -104,6 +116,28 @@ bool MixEngine::isOppositeLinked() const noexcept
 {
     BandFrame frame;
     return readOppositeFrame (frame);
+}
+
+void MixEngine::processSidechain (const juce::AudioBuffer<float>& buffer) noexcept
+{
+    const int numSamples = buffer.getNumSamples();
+
+    if (numSamples <= 0 || buffer.getNumChannels() <= 0)
+        return;
+
+    sidechainAnalyzer.process (buffer);
+
+    float magnitude = 0.0f;
+
+    for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+        magnitude = std::max (magnitude, buffer.getMagnitude (ch, 0, numSamples));
+
+    if (magnitude > 1.0e-5f)
+        sidechainHoldSamples = (int) (sampleRate * 2.0);
+    else
+        sidechainHoldSamples = std::max (0, sidechainHoldSamples - numSamples);
+
+    sidechainValid.store (sidechainHoldSamples > 0, std::memory_order_release);
 }
 
 std::array<float, kNumEqBands> MixEngine::computeEqTargets (const BandFrame& ownFrame) const noexcept
@@ -334,6 +368,22 @@ void MixEngine::process (juce::AudioBuffer<float>& buffer, float tempo) noexcept
 
     grMeter.store (blockGr, std::memory_order_relaxed);
     deessMeter.store (blockDeEss, std::memory_order_relaxed);
+
+    if (sidechainHoldSamples > 0)
+    {
+        sidechainHoldSamples = std::max (0, sidechainHoldSamples - numSamples);
+        sidechainValid.store (sidechainHoldSamples > 0, std::memory_order_release);
+    }
+
+    if (isVocal)
+    {
+        const bool useSpace = params.mode == Mode::style;
+
+        space.process (buffer.getArrayOfWritePointers(), numChannels, numSamples,
+                       useSpace ? params.reverbAmount : 0.0f,
+                       useSpace ? params.delayAmount : 0.0f,
+                       tempo);
+    }
 
     const float targetOutputGain = dbToGain (params.outputGainDb);
     const float targetMix = std::clamp (params.mix, 0.0f, 1.0f);

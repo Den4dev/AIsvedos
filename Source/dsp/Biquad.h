@@ -55,6 +55,20 @@ struct Biquad
         a2 = (1.0f - alpha) / a0;
     }
 
+    void setLowPass (double sr, float freq, float q) noexcept
+    {
+        const float w0 = omega (sr, freq);
+        const float alpha = std::sin (w0) / (2.0f * std::max (q, 0.05f));
+        const float c = std::cos (w0);
+        const float a0 = 1.0f + alpha;
+
+        b0 = ((1.0f - c) * 0.5f) / a0;
+        b1 = (1.0f - c) / a0;
+        b2 = b0;
+        a1 = (-2.0f * c) / a0;
+        a2 = (1.0f - alpha) / a0;
+    }
+
     void setHighShelf (double sr, float freq, float gainDb, float slope = 1.0f) noexcept
     {
         const float A = std::pow (10.0f, gainDb / 40.0f);

@@ -225,15 +225,17 @@ VocalPocketEditor::VocalPocketEditor (VocalPocketProcessor& processorToUse)
     linkStatus.setColour (juce::Label::textColourId, kMuted);
     addAndMakeVisible (linkStatus);
 
-    addKnob ("FIT", "fit", 24, 300, 78, 92);
-    addKnob ("REF", "ref", 105, 300, 78, 92);
-    addKnob ("COMP", "comp", 186, 300, 78, 92);
-    addKnob ("DE-ESS", "deess", 267, 300, 78, 92);
-    addKnob ("UNMASK", "unmask", 348, 300, 78, 92);
-    addKnob ("SAT", "sat", 429, 300, 78, 92);
-    addKnob ("LOW CUT", "lowcut", 510, 300, 78, 92);
-    addKnob ("OUT", "output", 591, 300, 78, 92);
-    addKnob ("MIX", "mix", 672, 300, 78, 92);
+    addKnob ("FIT", "fit", 24, 300, 60, 92);
+    addKnob ("REF", "ref", 89, 300, 60, 92);
+    addKnob ("COMP", "comp", 154, 300, 60, 92);
+    addKnob ("DE-ESS", "deess", 219, 300, 60, 92);
+    addKnob ("UNMASK", "unmask", 284, 300, 60, 92);
+    addKnob ("SAT", "sat", 349, 300, 60, 92);
+    addKnob ("LOW CUT", "lowcut", 414, 300, 60, 92);
+    addKnob ("REVERB", "reverb", 479, 300, 60, 92);
+    addKnob ("DELAY", "delay", 544, 300, 60, 92);
+    addKnob ("OUT", "output", 609, 300, 60, 92);
+    addKnob ("MIX", "mix", 674, 300, 60, 92);
 
     setSize (776, 452);
     setResizable (false, false);
@@ -267,6 +269,7 @@ void VocalPocketEditor::addKnob (const juce::String& labelText, const juce::Stri
                                  int x, int y, int width, int height)
 {
     Knob knob;
+    knob.parameterId = parameterId;
     knob.label = std::make_unique<juce::Label>();
     knob.label->setText (labelText, juce::dontSendNotification);
     knob.label->setFont (juce::Font (10.0f, juce::Font::bold));
@@ -336,6 +339,12 @@ void VocalPocketEditor::resized()
 void VocalPocketEditor::timerCallback()
 {
     const int role = (int) processor.apvts.getRawParameterValue ("role")->load();
+    const bool styleMode = (int) processor.apvts.getRawParameterValue ("mode")->load() == 1;
+
+    for (auto& knob : knobs)
+        if (knob.parameterId == "reverb" || knob.parameterId == "delay")
+            knob.slider->setEnabled (styleMode);
+
     roleVocal.setToggleState (role == 0, juce::dontSendNotification);
     roleBeat.setToggleState (role == 1, juce::dontSendNotification);
     roleVocal.setColour (juce::TextButton::buttonColourId, role == 0 ? kAccent : juce::Colour (0xff23272e));
@@ -386,10 +395,13 @@ void VocalPocketEditor::timerCallback()
         "AUTO " + juce::String (processor.getAutoGainDb(), 1) + " dB",
         juce::dontSendNotification);
 
+    const bool sidechain = processor.isSidechainActive();
     const bool linked = processor.isOppositeLinked();
     const int currentRole = (int) processor.apvts.getRawParameterValue ("role")->load();
-    linkStatus.setText (linked ? (currentRole == 0 ? "LINK: BEAT OK" : "LINK: VOCAL OK") : "LINK: WAITING",
-                        juce::dontSendNotification);
+    const auto linkText = sidechain ? juce::String ("LINK: SIDECHAIN")
+                                    : (linked ? (currentRole == 0 ? "LINK: BEAT BUS" : "LINK: VOCAL BUS")
+                                              : "LINK: WAITING");
+    linkStatus.setText (linkText, juce::dontSendNotification);
     linkStatus.setColour (juce::Label::textColourId, linked ? juce::Colour (0xff61d095) : kMuted);
 
     eqCurve.repaint();
